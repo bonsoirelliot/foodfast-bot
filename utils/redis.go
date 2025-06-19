@@ -86,6 +86,17 @@ func CheckUserExistsPubSub(userID int64) (bool, error) {
 	return false, fmt.Errorf("unexpected response: %s", resp)
 }
 
+func RegisterUserPubSub(userID int64, phone string, name string) error {
+	req := BotRequest{
+		Type: "sign_up",
+		Data: UserSingUpRequest{UserID: userID, Phone: phone, Name: name},
+	}
+
+	_, err := SendRequestAndWaitResponse("bot_requests", "sign_up_response", req, 2*time.Second)
+
+	return err
+}
+
 func StartRequestListener(onMessageRecieved func(req SendMessageRequest)) {
 	fmt.Println("Starting request listener")
 

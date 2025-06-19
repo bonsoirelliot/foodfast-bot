@@ -85,7 +85,11 @@ func handleUpdate(update BotUpdate) {
 	}
 
 	if update.Message.Contact.PhoneNumber != "" {
-		// Здесь должна быть регистрация пользователя
+		err := utils.RegisterUserPubSub(userID, update.Message.Contact.PhoneNumber, update.Message.From.FirstName)
+		if err != nil {
+			SendMessage(chatID, "Ошибка при регистрации пользователя. Попробуйте позже.")
+			return
+		}
 		SendMessage(chatID, "Спасибо! Вы зарегистрированы.")
 		return
 	}
@@ -94,8 +98,9 @@ func handleUpdate(update BotUpdate) {
 func SendMessage(chatID int64, text string) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", telegramToken)
 	body, _ := json.Marshal(map[string]interface{}{
-		"chat_id": chatID,
-		"text":    text,
+		"chat_id":      chatID,
+		"text":         text,
+		"reply_markup": map[string]bool{"remove_keyboard": true},
 	})
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(body))
 	if err != nil {
