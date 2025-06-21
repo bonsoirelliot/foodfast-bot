@@ -4,53 +4,44 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"foodfast-bot/utils"
-	"os"
-
+	"foodfast-bot/internal/domain/models"
+	"foodfast-bot/internal/domain/user"
+	"foodfast-bot/internal/pkg/redis"
 	"log"
 	"net/http"
+	"os"
 )
 
-var telegramToken string
-
-type BotUpdate struct {
-	UpdateID int     `json:"update_id"`
-	Message  Message `json:"message"`
+type Bot struct {
+	telegramToken string
+	userService   *user.Service
+	redisClient   *redis.Client
 }
 
-type Message struct {
-	MessageID int    `json:"message_id"`
-	From      User   `json:"from"`
-	Text      string `json:"text"`
-	Contact   struct {
-		PhoneNumber string `json:"phone_number"`
-	} `json:"contact"`
-	Chat struct {
-		ID int64 `json:"id"`
-	} `json:"chat"`
+func New(userService *user.Service, redisClient *redis.Client) *Bot {
+	return &Bot{
+		telegramToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+		userService:   userService,
+		redisClient:   redisClient,
+	}
 }
 
-type User struct {
-	ID        int64  `json:"id"`
-	FirstName string `json:"first_name"`
-}
+func (b *Bot) Start() {
+	fmt.Println("token: ", b.telegramToken)
+	go b.startRequestListener()
 
-func StartBot() {
-	telegramToken = os.Getenv("TELEGRAM_BOT_TOKEN")
-
-	fmt.Println("token: ", telegramToken)
 	offset := 0
 	for {
-		updates := getUpdates(offset)
+		updates := b.getUpdates(offset)
 		for _, update := range updates {
 			offset = update.UpdateID + 1
-			handleUpdate(update)
+			b.handleUpdate(update)
 		}
 	}
 }
 
-func getUpdates(offset int) []BotUpdate {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30", telegramToken, offset)
+func (b *Bot) getUpdates(offset int) []models.BotUpdate {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30", b.telegramToken, offset)
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Println("getUpdates error:", err)
@@ -58,45 +49,43 @@ func getUpdates(offset int) []BotUpdate {
 	}
 	defer resp.Body.Close()
 	var result struct {
-		Result []BotUpdate `json:"result"`
+		Result []models.BotUpdate `json:"result"`
 	}
 	json.NewDecoder(resp.Body).Decode(&result)
 	return result.Result
 }
 
-func handleUpdate(update BotUpdate) {
+func (b *Bot) handleUpdate(update models.BotUpdate) {
 	chatID := update.Message.Chat.ID
 	userID := update.Message.From.ID
-	// firstName := update.Message.From.FirstName // больше не используется
 
 	if update.Message.Text == "/start" {
-		//check if user exists in redis
-		exists, err := utils.CheckUserExistsPubSub(userID)
+		exists, err := b.userService.CheckUserExists(userID)
 		if err != nil {
-			SendMessage(chatID, "Ошибка при проверке пользователя. Попробуйте позже.")
+			b.SendMessage(chatID, "Ошибка при проверке пользователя. Попробуйте позже.")
 			return
 		}
 		if exists {
-			SendMessage(chatID, "Я пока что умею только регистрировать, новый функционал ещё в разработке...")
+			b.SendMessage(chatID, "Я пока что умею только регистрировать, новый функционал ещё в разработке...")
 		} else {
-			sendRequestPhone(chatID)
+			b.sendRequestPhone(chatID)
 		}
 		return
 	}
 
 	if update.Message.Contact.PhoneNumber != "" {
-		err := utils.RegisterUserPubSub(userID, update.Message.Contact.PhoneNumber, update.Message.From.FirstName)
+		err := b.userService.RegisterUser(userID, update.Message.Contact.PhoneNumber, update.Message.From.FirstName)
 		if err != nil {
-			SendMessage(chatID, "Ошибка при регистрации пользователя. Попробуйте позже.")
+			b.SendMessage(chatID, "Ошибка при регистрации пользователя. Попробуйте позже.")
 			return
 		}
-		SendMessage(chatID, "Спасибо! Вы зарегистрированы.")
+		b.SendMessage(chatID, "Спасибо! Вы зарегистрированы.")
 		return
 	}
 }
 
-func SendMessage(chatID int64, text string) error {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", telegramToken)
+func (b *Bot) SendMessage(chatID int64, text string) error {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", b.telegramToken)
 	body, _ := json.Marshal(map[string]interface{}{
 		"chat_id":      chatID,
 		"text":         text,
@@ -111,8 +100,8 @@ func SendMessage(chatID int64, text string) error {
 	return nil
 }
 
-func sendRequestPhone(chatID int64) {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", telegramToken)
+func (b *Bot) sendRequestPhone(chatID int64) {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", b.telegramToken)
 	keyboard := map[string]interface{}{
 		"keyboard": [][]map[string]interface{}{
 			{
@@ -131,4 +120,21 @@ func sendRequestPhone(chatID int64) {
 		"reply_markup": keyboard,
 	})
 	http.Post(url, "application/json", bytes.NewBuffer(body))
+}
+
+func (b *Bot) startRequestListener() {
+	fmt.Println("Starting request listener")
+
+	pubsub := b.redisClient.Subscribe("api_requests")
+	ch := pubsub.Channel()
+
+	for msg := range ch {
+		var req models.SendMessageRequest
+		if err := json.Unmarshal([]byte(msg.Payload), &req); err != nil {
+			fmt.Println("Error unmarshalling bot request:", err)
+			continue
+		}
+		fmt.Println("msg.Payload", msg.Payload)
+		b.SendMessage(req.UserID, req.Text)
+	}
 }

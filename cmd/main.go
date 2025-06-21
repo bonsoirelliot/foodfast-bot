@@ -3,7 +3,8 @@ package main
 import (
 	"fmt"
 	"foodfast-bot/internal/bot"
-	"foodfast-bot/utils"
+	"foodfast-bot/internal/domain/user"
+	"foodfast-bot/internal/pkg/redis"
 	"log"
 
 	"github.com/joho/godotenv"
@@ -11,19 +12,15 @@ import (
 
 func main() {
 	err := godotenv.Load()
-
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
 
 	fmt.Println("Starting bot...")
 
-	utils.InitRedis()
+	redisClient := redis.New()
+	userService := user.New(redisClient)
+	bot := bot.New(userService, redisClient)
 
-	// слушаем канал редис, чтобы получать сообщения от апи
-	utils.StartRequestListener(func(req utils.SendMessageRequest) {
-		bot.SendMessage(req.UserID, req.Text)
-	})
-
-	bot.StartBot()
+	bot.Start()
 }
