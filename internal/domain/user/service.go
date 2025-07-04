@@ -1,6 +1,7 @@
 package user
 
 import (
+	"fmt"
 	"time"
 
 	"foodfast-bot/internal/domain/models"
@@ -15,6 +16,7 @@ type Service struct {
 }
 
 func New(pubSub PubSubClient) *Service {
+	fmt.Println("New User Service")
 	return &Service{pubSub: pubSub}
 }
 

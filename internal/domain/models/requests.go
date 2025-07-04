@@ -15,7 +15,8 @@ type UserExistsRequest struct {
 }
 
 type UserSingUpRequest struct {
-	UserID int64  `json:"user_id"`
-	Phone  string `json:"phone"`
-	Name   string `json:"name"`
+	UserID   int64  `json:"user_id"`
+	Phone    string `json:"phone"`
+	Name     string `json:"name"`
+	Username string `json:"username"`
 }

@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"foodfast-bot/internal/bot"
 	"foodfast-bot/internal/domain/user"
-	"foodfast-bot/internal/pkg/redis"
+	"foodfast-bot/internal/pkg/rabbit"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/joho/godotenv"
 )
@@ -18,9 +21,16 @@ func main() {
 
 	fmt.Println("Starting bot...")
 
-	redisClient := redis.New()
-	userService := user.New(redisClient)
-	bot := bot.New(userService, redisClient)
+	// rabbitURL := os.Getenv("RABBITMQ_URL")
+	rabbitClient := rabbit.New("amqp://user:password@rabbitmq:5672/")
+	userService := user.New(rabbitClient)
+	b := bot.New(userService, rabbitClient)
 
-	bot.Start()
+	b.Start()
+
+	// Graceful shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+	<-stop
+	fmt.Println("Gracefully stopped")
 }
